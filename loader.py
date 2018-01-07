@@ -6,37 +6,17 @@ import os
 import pandas as pd
 
 
-def load_csv(csv_path):
-    data = pd.read_csv(csv_path)
-    data_use = data[pd.notnull(data['label'])]
-    return zip(data_use.fname, data_use.label)
 
-
-def parse_single_audio(wav_rel_path):
-    import librosa
-    import librosa.display
-
-    wav_path = './data/{}'.format(wav_rel_path)
-    hb_name = os.path.basename(wav_rel_path)
-
-    data, sample_rate = librosa.load(wav_path)
-    feature = np.mean(librosa.feature.mfcc(y=data, sr=sample_rate, n_mfcc=40).T,
-                      axis=0)
-
-    """
-    plt.figure()
-    librosa.display.waveplot(data, sr=sample_rate)
-    plt.savefig('plots/{}.png'.format(hb_name))
-    """
-    return feature
+def make_array(text):
+    return np.fromstring(text, sep='   ')
 
 
 def process_data(audio_data):
     from sklearn.model_selection import train_test_split
     from sklearn.preprocessing import LabelEncoder
 
-    features = np.array(audio_data['Feature'])
-    labels = np.array(audio_data['Label'])
+    features = np.array(audio_data['Feature'].tolist())
+    labels = np.array(audio_data['Label'].tolist())
     
     lb = LabelEncoder()
     
@@ -51,47 +31,45 @@ def process_data(audio_data):
     return x_train, x_test, y_train, y_test
 
 
-def cnn(label_size):
-    filter_size = 2
-
-    model = Sequential()
-
-    model.add(Dense(256, input_shape=(40,), activation='relu'))
-    model.add(Dropout(0.5))
-
-    model.add(Dense(256, activation='relu'))
-    model.add(Dropout(0.5))
-
-    model.add(Dense(label_size, activation='softmax'))
-
-    model.compile(loss='categorical_crossentropy',
-                  metrics=['accuracy'], optimizer='adam')
-    return model
-
-
 def basic_cnn(shape):
     """ Builds basic Convolutional neural network model """
     from keras.layers import Dense, Dropout, Flatten, InputLayer, MaxPooling1D
     from keras.layers.normalization import BatchNormalization
     from keras.layers.convolutional import Conv1D
     from keras.models import Sequential
+    import params
+    
+    opt = params.standard()
 
     model = Sequential()
-
-    model.add(Conv1D(20,
-                     2,
+    model.add(Conv1D(opt['conv_filters'], opt['kernel_size'],
                      input_shape=(40, 1,),
-                     strides=1,
+                     strides=opt['kernel_stride'],
+                     activation=opt['cnn_activate'],
                      padding='same'))
+    model.add(BatchNormalization())
+
+    model.add(Conv1D(opt['conv_filters'], opt['kernel_size'],
+                     strides=opt['kernel_stride'],
+                     activation=opt['cnn_activate'],
+                     padding='same'))
+    model.add(BatchNormalization())
+
+    model.add(Conv1D(opt['conv_filters'], opt['kernel_size'],
+                     strides=opt['kernel_stride'],
+                     activation=opt['cnn_activate'],
+                     padding='same'))
+    model.add(BatchNormalization())
+
     model.add(MaxPooling1D(padding='same'))
-    model.add(Dropout(0.1))
+    #model.add(Dropout(0.2))
     model.add(Flatten())
 
-    model.add(Dense(120, activation='relu'))
+    model.add(Dense(opt['dense_1'], activation=opt['activate_1']))
     model.add(Dense(4, activation='softmax'))
 
-    model.compile(loss='categorical_crossentropy',
-                  optimizer='adam',
+    model.compile(loss=opt['loss'],
+                  optimizer=opt['optimizer'],
                   metrics=['accuracy'])
 
     print(model.summary())
@@ -99,21 +77,17 @@ def basic_cnn(shape):
 
 
 def main():
-    audio_files = load_csv('./data/set_a.csv')
-    audio_data = {'Feature': [], 'Label': []}
-
-    for wav_rel_path, hb_type in audio_files:
-        try:
-            feature = parse_single_audio(wav_rel_path)
-            audio_data['Feature'].append(feature)
-            audio_data['Label'].append(hb_type)
-        except Exception as err:
-            print(err)
-
+    # Reads and Processes Data
+    audio_data = pd.read_pickle('./data/set_a_parsed.pkl')
     x_train, x_test, y_train, y_test = process_data(audio_data)
 
+    # Creates range to loop filter between
+    change = 'gpu_triplecnn_batch'
+    range = [2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26]
+    history_dict = {x: {'loss': 0.0, 'acc': 0.0} for x in range}
+
     model = basic_cnn(x_train.shape)
-    model.fit(x_train, y_train, batch_size=32, epochs=20,
+    model.fit(x_train, y_train, epochs=100,
               validation_data=(x_test, y_test))
 
 
